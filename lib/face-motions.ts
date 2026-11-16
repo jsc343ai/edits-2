@@ -37,6 +37,63 @@ interface Pose {
 
 const TAU = Math.PI * 2;
 
+export interface FaceOpen {
+  x: number;
+  y: number;
+  r: number;
+  amount: number;
+  mode: "mouth" | "eye";
+}
+
+let openScratch: HTMLCanvasElement | null = null;
+
+export function openFace(face: HTMLCanvasElement, opens: FaceOpen[], t: number): HTMLCanvasElement {
+  if (opens.length === 0) return face;
+  if (!openScratch) openScratch = document.createElement("canvas");
+  const out = openScratch;
+  if (out.width !== face.width || out.height !== face.height) {
+    out.width = face.width;
+    out.height = face.height;
+  }
+  const ctx = out.getContext("2d");
+  if (!ctx) return face;
+  ctx.clearRect(0, 0, out.width, out.height);
+  ctx.drawImage(face, 0, 0);
+  opens.forEach((o, i) => {
+    const cx = o.x * face.width;
+    const cy = o.y * face.height;
+    const r = o.r * face.width;
+    const cycles = o.mode === "mouth" ? 3 : 1;
+    const offset = o.mode === "mouth" ? i * 0.9 : 0;
+    const wave = (1 - Math.cos((t / MOTION_SECONDS) * TAU * cycles + offset)) / 2;
+    const d = r * o.amount * (o.mode === "eye" ? Math.pow(wave, 6) : wave);
+    if (d < 0.5) return;
+    if (o.mode === "mouth") {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(cx, cy, r, 0, TAU);
+      ctx.clip();
+      ctx.fillStyle = "#2a0d12";
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + d / 2, r * 0.85, d / 2 + 1, 0, 0, TAU);
+      ctx.fill();
+      ctx.restore();
+    }
+    ctx.save();
+    ctx.translate(0, d);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, TAU);
+    ctx.clip();
+    ctx.beginPath();
+    if (o.mode === "mouth") ctx.rect(cx - r, cy, r * 2, r);
+    else ctx.rect(cx - r, cy - r, r * 2, r);
+    ctx.clip();
+    ctx.drawImage(face, 0, 0);
+    ctx.restore();
+  });
+  return out;
+}
+
 function poseFor(id: string, t: number): Pose {
   const base: Pose = { headX: 0, headY: 0, headRot: 0, yaw: 0, bodyY: 0, armL: [0.25, 0.1], armR: [0.25, 0.1] };
   const w = (t / MOTION_SECONDS) * TAU;
