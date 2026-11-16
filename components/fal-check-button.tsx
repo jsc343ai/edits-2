@@ -5,6 +5,7 @@ import useSWR from "swr";
 import { Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ResendKeyForm } from "@/components/resend-key-form";
 import { adminHeaders } from "@/lib/admin-token";
 
 interface CheckResult {
@@ -157,6 +158,7 @@ export function FalCheckButton() {
         </div>
       ) : null}
       <AdminKeyForm />
+      <ResendKeyForm />
     </section>
   );
 }

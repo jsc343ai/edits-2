@@ -164,19 +164,12 @@ export function SaveDialog({ pending, onClose }: { pending: PendingSave | null; 
       let url: string;
       try {
         url = await relayUpload(pending.blob, pending.filename);
-      } catch (e) {
-        const reason = e instanceof Error ? e.message : "";
-        let cause = "";
-        try {
-          const res = await fetch("/api/relay/check", { cache: "no-store" });
-          const info = (await res.json()) as { hasToken?: boolean };
-          if (info.hasToken === false) cause = L("原因：這個網站沒有雲端讀寫金鑰，請到專案的環境變數加入 Blob 的讀寫金鑰後重新發布。", "Cause: this site has no cloud read-write key. Add the Blob read-write key in project variables and republish.");
-          else if (info.hasToken === true) cause = L("金鑰已設定，問題在連線或空間設定。", "The key is set; the problem is the connection or store setup.");
-        } catch {
-          cause = L("原因：連不到我們的伺服器，可能是 Pi 瀏覽器擋下連線，或網站還沒重新發布。", "Cause: could not reach our server. Pi Browser may be blocking the request, or the site is not republished.");
-        }
+      } catch {
         setError(
-          L("暫時無法送到手機瀏覽器。", "Could not hand this off to your phone browser.") + (cause ? ` ${cause}` : "") + (reason ? ` [${reason}]` : ""),
+          L(
+            "這個網站目前還沒開通「送到手機瀏覽器」的雲端中轉，所以這個按鈕暫時不能用。不影響存檔，請改用下面任一方式：① 按「分享」，在選單選相簿或檔案；② 長按上方的影片或圖片，選「儲存」；③ 按上方影片的「⋮」選「下載」。",
+            "Phone-browser hand-off is not enabled on this site yet, so this button cannot work for now. You can still save: (1) tap Share and pick Photos or Files; (2) press and hold the video or image above and choose Save; (3) use the video's ⋮ menu and choose Download.",
+          ),
         );
         return;
       }
