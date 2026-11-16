@@ -10,6 +10,7 @@ import {
   safeEqual,
 } from "@/lib/server/admin-auth";
 import { hmacSha256Hex } from "@/lib/server/hmac";
+import { getResendKey } from "@/lib/server/resend-key";
 
 function startSession() {
   const token = makeAdminToken();
@@ -54,7 +55,7 @@ export async function POST(req: Request) {
     return startSession();
   }
 
-  const apiKey = process.env.RESEND_API_KEY;
+  const apiKey = getResendKey();
   const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
   const code = typeof body.code === "string" ? body.code.trim() : "";
   const token = typeof body.token === "string" ? body.token : "";

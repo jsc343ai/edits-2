@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
 import { createHmac, randomInt } from "node:crypto";
+import { getResendKey } from "@/lib/server/resend-key";
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const CODE_TTL_MS = 10 * 60 * 1000;
 
 export async function POST(req: Request) {
-  const apiKey = process.env.RESEND_API_KEY;
+  const apiKey = getResendKey();
   if (!apiKey) return NextResponse.json({ error: "not_configured" }, { status: 503 });
 
   const body = (await req.json().catch(() => ({}))) as { email?: unknown };
