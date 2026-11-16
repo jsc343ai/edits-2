@@ -1,14 +1,15 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ArrowRight, Brush, Check, ChevronLeft, Download, Gem, Loader2, ScanFace, Sparkles, Upload, Wand2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
+import { ArrowRight, Brush, Check, ChevronLeft, Download, Eye, Gem, Loader2, ScanFace, Smile, Sparkles, Trash2, Upload, Wand2 } from "lucide-react";
 import { PLANNED_TEMPLATES, SWAP_LENGTHS, SWAP_MODULES, SWAP_TEMPLATES, type SwapLength, type SwapModule, type SwapTemplate } from "@/lib/swap-templates";
 import { Button } from "@/components/ui/button";
 import { Slider } from "@/components/ui/slider";
 import { useLang } from "@/components/lang-context";
 import { aspectSize, type Aspect } from "@/lib/compositor";
-import { MOTIONS, MOTION_SECONDS, drawMotionFrame, pickMotionByText } from "@/lib/face-motions";
+import { MOTIONS, MOTION_SECONDS, drawMotionFrame, openFace, pickMotionByText, type FaceOpen } from "@/lib/face-motions";
 import { EditorView } from "@/components/views/editor-view";
+import { SaveDialog, type PendingSave } from "@/components/save-dialog";
 import type { EditMode } from "@/components/app-shell";
 
 const ASPECTS: Aspect[] = ["9:16", "3:4", "4:5", "1:1", "4:3", "16:9", "2:3", "3:2"];
@@ -110,6 +111,15 @@ function HandDrawnFaceSwap({ mode, onOpenPay, onBack, initialFile }: { mode: Edi
   const [message, setMessage] = useState("");
   const [video, setVideo] = useState<File | null>(null);
   const [saved, setSaved] = useState(false);
+  const [opens, setOpens] = useState<FaceOpen[]>([]);
+  const [placing, setPlacing] = useState<"mouth" | "eye" | null>(null);
+  const [sel, setSel] = useState(-1);
+  const [pendingSave, setPendingSave] = useState<PendingSave | null>(null);
+  const opensRef = useRef<FaceOpen[]>([]);
+  const selRef = useRef(-1);
+  const openCanvasRef = useRef<HTMLCanvasElement>(null);
+  opensRef.current = opens;
+  selRef.current = sel;
 
   const motion = MOTIONS.find((m) => m.id === motionId) ?? MOTIONS[0];
 
@@ -178,12 +188,74 @@ function HandDrawnFaceSwap({ mode, onOpenPay, onBack, initialFile }: { mode: Edi
     let raf = 0;
     const t0 = performance.now();
     const tick = (now: number) => {
-      drawMotionFrame(ctx, w, h, ((now - t0) / 1000) % MOTION_SECONDS, face, motion);
+      const t = ((now - t0) / 1000) % MOTION_SECONDS;
+      drawMotionFrame(ctx, w, h, t, openFace(face, opensRef.current, t), motion);
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
   }, [stage, aspect, motion]);
+
+  useEffect(() => {
+    if (stage !== "motion") return;
+    const canvas = openCanvasRef.current;
+    const face = faceRef.current;
+    if (!canvas || !face) return;
+    canvas.width = FACE_W;
+    canvas.height = FACE_H;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    let raf = 0;
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      const t = ((now - t0) / 1000) % MOTION_SECONDS;
+      ctx.clearRect(0, 0, FACE_W, FACE_H);
+      ctx.drawImage(openFace(face, opensRef.current, t), 0, 0);
+      opensRef.current.forEach((o, i) => {
+        ctx.save();
+        ctx.strokeStyle = "#22c55e";
+        ctx.lineWidth = i === selRef.current ? 4 : 2;
+        ctx.setLineDash([6, 4]);
+        ctx.beginPath();
+        ctx.arc(o.x * FACE_W, o.y * FACE_H, o.r * FACE_W, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      });
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [stage]);
+
+  const onOpenCanvasClick = (e: ReactMouseEvent<HTMLCanvasElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = Math.min(1, Math.max(0, (e.clientX - rect.left) / rect.width));
+    const y = Math.min(1, Math.max(0, (e.clientY - rect.top) / rect.height));
+    if (placing) {
+      const next: FaceOpen = placing === "mouth" ? { x, y, r: 0.12, amount: 0.5, mode: "mouth" } : { x, y, r: 0.07, amount: 0.9, mode: "eye" };
+      setOpens((list) => [...list, next]);
+      setSel(opensRef.current.length);
+    } else if (sel >= 0 && sel < opens.length) {
+      setOpens((list) => list.map((o, i) => (i === sel ? { ...o, x, y } : o)));
+    }
+  };
+
+  const autoPlaceOpens = () => {
+    setOpens([
+      { x: 0.5, y: 0.68, r: 0.12, amount: 0.5, mode: "mouth" },
+      { x: 0.34, y: 0.43, r: 0.07, amount: 0.9, mode: "eye" },
+      { x: 0.66, y: 0.43, r: 0.07, amount: 0.9, mode: "eye" },
+    ]);
+    setPlacing(null);
+    setSel(0);
+  };
+
+  const updateSel = (patch: Partial<FaceOpen>) => setOpens((list) => list.map((o, i) => (i === sel ? { ...o, ...patch } : o)));
+
+  const removeSel = () => {
+    setOpens((list) => list.filter((_, i) => i !== sel));
+    setSel(-1);
+  };
 
   const applyPrompt = () => {
     const hit = pickMotionByText(prompt);
@@ -235,12 +307,11 @@ function HandDrawnFaceSwap({ mode, onOpenPay, onBack, initialFile }: { mode: Edi
   const downloadVideo = async () => {
     const file = await exportVideo();
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = file.name;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 2000);
+    setPendingSave({
+      blob: file,
+      filename: file.name,
+      onSaved: () => setMessage(L("作品已處理，記得確認相簿或檔案裡有存到。", "Done. Please check your Photos or Files to confirm it was saved.")),
+    });
   };
 
   if (stage === "edit" && video) {
@@ -371,6 +442,63 @@ function HandDrawnFaceSwap({ mode, onOpenPay, onBack, initialFile }: { mode: Edi
               </Button>
             </div>
           )}
+          <section className="flex flex-col gap-3 rounded-lg border border-border bg-card p-3" aria-label={L("嘴巴與眼睛開合", "Mouth and eye open and close")}>
+            <p className="text-sm font-medium">{L("嘴巴與眼睛開合", "Mouth and eye open and close")}</p>
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {L(
+                "按「自動放置」會依臉部位置放好嘴巴和兩隻眼睛；也可以按下方按鈕後，點臉上的位置自己放。綠色虛線圈是會動的範圍，用滑桿調到剛好蓋住嘴巴或眼睛。選到某一點後，不按放置按鈕直接點臉，就能移動它。",
+                "Press Auto place to set the mouth and both eyes, or press a button below and tap the face to place them yourself. The green dashed circle is the area that moves. Size it to just cover the mouth or eye. With a point selected and no place button on, tap the face to move it.",
+              )}
+            </p>
+            <canvas
+              ref={openCanvasRef}
+              onClick={onOpenCanvasClick}
+              className="mx-auto h-56 w-auto rounded-md border border-border bg-muted"
+              aria-label={L("點臉部放置嘴巴或眼睛", "Tap the face to place a mouth or eye")}
+            />
+            <div className="grid grid-cols-3 gap-2">
+              <Button type="button" variant="secondary" onClick={autoPlaceOpens}>
+                <Wand2 className="size-4" aria-hidden="true" />
+                {L("自動放置", "Auto place")}
+              </Button>
+              <Button type="button" variant={placing === "mouth" ? "default" : "outline"} aria-pressed={placing === "mouth"} onClick={() => setPlacing(placing === "mouth" ? null : "mouth")}>
+                <Smile className="size-4" aria-hidden="true" />
+                {L("放嘴巴", "Mouth")}
+              </Button>
+              <Button type="button" variant={placing === "eye" ? "default" : "outline"} aria-pressed={placing === "eye"} onClick={() => setPlacing(placing === "eye" ? null : "eye")}>
+                <Eye className="size-4" aria-hidden="true" />
+                {L("放眼睛", "Eye")}
+              </Button>
+            </div>
+            {opens.length > 0 && (
+              <div className="flex flex-wrap gap-2" role="radiogroup" aria-label={L("已放置的點", "Placed points")}>
+                {opens.map((o, i) => (
+                  <Button key={i} type="button" size="sm" role="radio" aria-checked={sel === i} variant={sel === i ? "default" : "outline"} onClick={() => { setPlacing(null); setSel(i); }}>
+                    {L(`${i + 1}・${o.mode === "eye" ? "眼睛" : "嘴巴"}`, `${i + 1} ${o.mode === "eye" ? "Eye" : "Mouth"}`)}
+                  </Button>
+                ))}
+                <Button type="button" size="sm" variant="ghost" onClick={() => { setOpens([]); setSel(-1); }}>
+                  {L("全部清除", "Clear all")}
+                </Button>
+              </div>
+            )}
+            {sel >= 0 && sel < opens.length && (
+              <div className="flex flex-col gap-3">
+                <label className="flex flex-col gap-1 text-xs">
+                  {L("範圍大小", "Area size")}
+                  <Slider value={[opens[sel].r * 100]} min={3} max={25} step={0.5} onValueChange={([v]) => updateSel({ r: v / 100 })} />
+                </label>
+                <label className="flex flex-col gap-1 text-xs">
+                  {L("開合幅度", "Open amount")}
+                  <Slider value={[opens[sel].amount * 100]} min={10} max={100} step={1} onValueChange={([v]) => updateSel({ amount: v / 100 })} />
+                </label>
+                <Button type="button" variant="outline" onClick={removeSel}>
+                  <Trash2 className="size-4" aria-hidden="true" />
+                  {L("刪除這一點", "Delete this point")}
+                </Button>
+              </div>
+            )}
+          </section>
           <div className="grid grid-cols-2 gap-2" role="radiogroup" aria-label={L("動作模組", "Action templates")}>
             {MOTIONS.map((m) => (
               <Button key={m.id} type="button" role="radio" aria-checked={motionId === m.id} variant={motionId === m.id ? "default" : "outline"} onClick={() => setMotionId(m.id)}>
@@ -405,6 +533,7 @@ function HandDrawnFaceSwap({ mode, onOpenPay, onBack, initialFile }: { mode: Edi
           {message}
         </p>
       )}
+      <SaveDialog pending={pendingSave} onClose={() => setPendingSave(null)} />
     </div>
   );
 }
